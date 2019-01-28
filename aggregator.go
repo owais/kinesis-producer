@@ -12,6 +12,12 @@ var (
 	magicNumber = []byte{0xF3, 0x89, 0x9A, 0xC2}
 )
 
+type AggregatedBatch struct {
+	Records *k.PutRecordsRequestEntry
+	Count   int
+	Size    int
+}
+
 type Aggregator struct {
 	buf    []*Record
 	pkeys  []string
@@ -34,7 +40,7 @@ func (a *Aggregator) Put(data []byte, partitionKey string) {
 	// For now, all records in the aggregated record will have
 	// the same partition key.
 	// later, we will add shard-mapper same as the KPL use.
-	// see: https://github.com/a8m/kinesis-producer/issues/1
+	// see: https://github.com/omnition/kinesis-producer/issues/1
 	if len(a.pkeys) == 0 {
 		a.pkeys = append(a.pkeys, partitionKey)
 		a.nbytes += len([]byte(partitionKey))
@@ -51,7 +57,7 @@ func (a *Aggregator) Put(data []byte, partitionKey string) {
 // that compatible with the KCL's deaggregation logic.
 //
 // If you interested to know more about it. see: aggregation-format.md
-func (a *Aggregator) Drain() (*k.PutRecordsRequestEntry, error) {
+func (a *Aggregator) Drain() (*AggregatedBatch, error) {
 	if a.nbytes == 0 {
 		return nil, nil
 	}
@@ -67,12 +73,16 @@ func (a *Aggregator) Drain() (*k.PutRecordsRequestEntry, error) {
 	checkSum := h.Sum(nil)
 	aggData := append(magicNumber, data...)
 	aggData = append(aggData, checkSum...)
-	entry := &k.PutRecordsRequestEntry{
-		Data:         aggData,
-		PartitionKey: &a.pkeys[0],
+	batch := &AggregatedBatch{
+		Records: &k.PutRecordsRequestEntry{
+			Data:         aggData,
+			PartitionKey: &a.pkeys[0],
+		},
+		Count: a.Count(),
+		Size:  a.Size(),
 	}
 	a.clear()
-	return entry, nil
+	return batch, nil
 }
 
 func (a *Aggregator) clear() {
